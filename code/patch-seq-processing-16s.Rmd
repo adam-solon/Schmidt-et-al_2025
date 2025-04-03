@@ -1,0 +1,514 @@
+---
+title: "Svalbard Midtre Lovenbreen -- Patch Study"
+subtitle: "  \n Processing of Amplicon Sequence Variants - 16S SSU rRNA gene"
+author: "Adam J. Solon"
+date: "`r Sys.Date()`"
+#output: html_document
+output: 
+  pdf_document:
+  #includes:  
+  # in_header: my_header.txt
+  toc: TRUE
+fig_width: 8
+fig_height: 6
+fig_caption: true
+fontsize: 12pt
+#editor_options: 
+#  chunk_output_type: console
+---
+  
+# Script Summary  
+This script processes the Amplicon Sequence Variants (ASVs) table output from DADA2. It subsets ASVs from patches of biocrust in soils in the forefields of Midtre Lovenbreen on Svalbard. 
+
+### Steps of this pipeline:  
+1.  Create and organize directories
+2.  Load R packages
+3.  Input files
+4.  Format Files
+
+```{r echo = FALSE, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(include = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+
+```
+
+```{r, echo = FALSE, include = FALSE}
+# Change identifiers to your system and file naming
+user <- "F:"
+folder <- "/Projects"
+project <- "/Sunspears"
+study <- "/Studies"
+files <- "/Patch_Schmidt-et-al"
+
+directory.1 <- "/data/Patch_data_for_Adam"
+directory.2 <- "/analyses/amplicons/16s"
+
+analysis.1 <- "/seq_processing"
+
+ecosystem <- "glacial forefield - Svalbard" # Define the environment for use in report language.
+
+```
+
+```{r set paths for project}
+# First define the project and project folders. 
+
+# Create project directory
+###################################################
+study.fp <- paste0(user, folder, project, study)
+if (!dir.exists(study.fp)) dir.create(study.fp)
+
+# Create sub-directory for all analyses for project 
+###################################################
+files.fp <- paste0(study.fp, files)
+if (!dir.exists(files.fp)) dir.create(files.fp)
+
+# Create sub-directory for all analyses for project 
+###################################################
+directory.1.fp <- paste0(files.fp, directory.1)
+if (!dir.exists(directory.1.fp)) dir.create(directory.1.fp)
+
+# Create sub-directory for all analyses for project 
+###################################################
+directory.2.fp <- paste0(files.fp, directory.2)
+if (!dir.exists(directory.2.fp)) dir.create(directory.2.fp)
+
+# Create sub-directory for specific analysis 
+###################################################
+analysis.1.fp <- paste0(directory.2.fp, analysis.1)
+if (!dir.exists(analysis.1.fp)) dir.create(analysis.1.fp, recursive = TRUE)
+
+# Create sub-directories for analysis 
+###################################################
+
+# Create directory for 'before' pipeline inputs
+input.fp <- paste0(analysis.1.fp, "/input")
+if (!dir.exists(input.fp)) dir.create(input.fp, recursive = TRUE)
+
+# Create directory for 'within' pipeline R objects 
+objects.fp <- paste0(analysis.1.fp, "/objects")
+if (!dir.exists(objects.fp)) dir.create(objects.fp, recursive = TRUE)
+
+# Create directory for 'after' pipeline outputs 
+output.fp <- paste0(analysis.1.fp, "/output")
+if (!dir.exists(output.fp)) dir.create(output.fp, recursive = TRUE)
+
+# Check for the folders here as a sanity check. Should see "Input" and "Objects" if starting from scratch.
+list.files(analysis.1.fp) 
+```
+
+### Load R packages  
+
+```{r Install and load packages, echo = FALSE, include = FALSE}
+
+# install.packages("tidyverse")
+# install.packages("knitr")
+# install.packages("kableExtra")
+# install.packages("stringr")
+
+library(knitr); packageVersion("knitr")
+library(kableExtra); packageVersion("kableExtra")
+library(stringr); packageVersion("stringr")
+library(tidyverse); packageVersion("tidyverse")
+
+```
+
+* r version: `r getRversion()`
+* RStudio version: `r rstudioapi::versionInfo()$version`
+* r packages:  
+  tidyverse, `r packageVersion("tidyverse")` 
+knitr, `r packageVersion("knitr")`  
+kableExtra, `r packageVersion("KableExtra")`  
+stringr, `r packageVersion("stringr")`  
+
+### Input Files
+Required input files:   
+  
+1.  The ASV table from DADA2 pipeline 
+2.  The 'mapping file' w/ relevant metadata for each sample
+
+Input files and re-format for use in pipeline  
+
+```{r input data files}
+# input data files
+# ASV Table (from DADA2)
+asvTable.fp <- paste0(directory.1.fp, "/16Sseqtab_wtax_mctoolsr.txt") 
+
+# Mapping File (metadata relevant for study samples)
+mappingFile.fp <- paste0(directory.1.fp, "/patch_mapfile_16s.txt") 
+
+#input 16s ASV table w/ taxonomy
+a <- read.table(asvTable.fp, header = T, sep = "\t")
+
+#input metadata (i.e. mapping file)
+m <- read.table(mappingFile.fp, header = T, sep = "\t")
+
+```
+
+### Format Files
+
+```{r format}
+#rename 'ESV_ID' column in ASV table and remove 'taxonomy' from ASV table and create separate taxonomy data frame
+#rename ESV_ID
+a <- dplyr::rename(a, ASV_ID = ESV_ID)
+
+#create data frame of only taxonomy
+t <- as.data.frame(a$taxonomy)
+
+#ASV IDs as row names
+rownames(t) <- a$ASV_ID
+
+#rename column as 'taxonomy'
+names(t)[1] <- "taxonomy"
+
+#separate the taxonomic string by the ; separator
+t.1 <- stringr::str_split_fixed(t$taxonomy, ";", 6)
+
+#rename columns w/ taxonomic ranks for 16S data
+colnames(t.1)[1:6] <- c("Domain", "Phylum", "Class", "Order", "Family", "Genus")
+
+#save t.1 object as data frame
+t.1 <- as.data.frame(t.1)
+
+#assign row names from 'ASV_ID' column
+rownames(a) <- a$ASV_ID
+
+#remove ESV_ID column
+a$ASV_ID <- NULL
+
+#remove 'taxonomy' column from ASV table
+a$taxonomy <- NULL
+
+#set ASV ID rownames from 'a' for 't' dataframe
+rownames(t.1) <- rownames(a)
+
+```
+
+### Subset by Patch study  
+
+```{r subset samples}
+#subset ASV table
+#transpose so rows and columns are flipped
+a.1 <- as.data.frame(t(a))
+
+#move row names of samples into 1st column as 'SampleID' to match 1st column of mapping file
+a.1 <- tibble::rownames_to_column(a.1, "SampleID")
+
+#keep rows in ASV table with SampleIDs that match Sample IDs in mapping file
+a.2 <- subset(a.1, (SampleID %in% m$SampleID )) 
+
+#assign samples IDs back as row names
+rownames(a.2) <- a.2$SampleID
+
+#remove Sample ID column
+a.2$SampleID <- NULL
+
+```
+
+### Remove ASVs not present in this study  
+
+```{r}
+#transpose
+a.3 <- as.data.frame(t(a.2))
+
+#change cell values to numeric
+a.3 <- a.3 %>%
+   mutate_all(as.numeric)
+
+# create row sum column for ASV total sequences
+a.3 <- a.3 %>% mutate(total = rowSums(.))
+
+# re-order with greatest row sum 1st
+a.3 <- a.3 %>% arrange(desc(total))
+
+#remove rows (i.e., ASVs) that contain zeros
+a.4 <- a.3 %>% filter(total!= 0)
+
+#remove 'total' column
+a.4$total <- NULL
+
+#transpose so Sample ID are rownames
+a.5 <- as.data.frame(t(a.4))
+
+```
+
+## Subset blanks to remove possible contaminants  
+This step will subset out blank samples to determine if any contaminants were introduced during post-experiment sample processing (e.g., DNA extraction, library prep, sequencing).  
+  
+```{r create a data frame with blanks to determine contaminants in other samples}
+
+#subset mapping file with only blanks
+m.blanks <- filter(m, Patch_no == "blank") 
+
+#move row names of samples into 1st column as 'SampleID' to match 1st column of mapping file
+a.5 <- tibble::rownames_to_column(a.5, "SampleID")
+
+#keep rows in ASV table with SampleIDs that match Sample IDs in mapping file
+a.blanks <- subset(a.5, (SampleID %in% m.blanks$SampleID )) 
+
+#set sampleIDs as rownames
+rownames(a.blanks) <- a.blanks$SampleID
+
+#remove 'SampleID' column
+a.blanks$SampleID <- NULL
+
+#transpose
+a.blanks.1 <- as.data.frame(t(a.blanks))
+
+# create row sum column for ASV total sequences
+a.blanks.1 <- a.blanks.1 %>% mutate(total = rowSums(.))
+
+# re-order with greatest row sum 1st
+a.blanks.1 <- a.blanks.1 %>% arrange(desc(total))
+
+#remove rows (i.e., ASVs) that contain zeros
+a.blanks.2 <- a.blanks.1 %>% filter(total!= 0)
+
+#move row names of samples into 1st column as 'SampleID' to match column in taxonomy file
+a.blanks.2 <- tibble::rownames_to_column(a.blanks.2, "ASV_ID")
+
+#taxonomy table rownames to ASV ID column
+t.2 <- t.1 %>% tibble::rownames_to_column(var = "ASV_ID")
+
+#add taxonomy columns back into ASV table with a Left Join using inner_join function from dplyr
+a.blanks.T <- a.blanks.2 %>% inner_join(t.2, by= "ASV_ID")
+
+```
+
+```{r}
+#display
+print(a.blanks.T)
+
+```
+
+### Save contaminant list  
+  
+```{r}
+# save as an R file
+saveRDS(a.blanks.T, paste0(objects.fp, "/a.blanks.T.rds"))
+
+#save as .txt file
+write.table(a.blanks.T, file = paste0(output.fp, "/asvTab_blanks_wTax.txt"), 
+            sep = "\t", row.names = TRUE, col.names = NA)
+
+```
+
+### Calculate library size of each sample before filtering 
+  
+```{r create new column with row sums (i.e. library size of each sample) and reorder rows by descending value}
+
+#keep rows in ASV table with SampleIDs that do NOT match Sample IDs in blanks mapping file
+a.6 <- subset(a.5, !(SampleID %in% m.blanks$SampleID )) 
+
+#subset mapping file without blanks
+m.1 <- filter(m, Patch_no != "blank") 
+
+#row names as SampleID column
+rownames(a.6) <- a.6$SampleID
+
+#remove 'SampleID' column
+a.6$SampleID <- NULL
+
+# create row sum column
+a.lib.size <- a.6 %>% mutate(library_size = rowSums(.))
+
+# re-order with greatest row sum 1st
+a.lib.size <- a.lib.size %>% arrange(desc(library_size))
+
+#remove any samples with less than 1000 sequences
+a.lib.size.1 <- a.lib.size %>% filter(library_size > 1000)
+
+#class data frame 
+a.lib.size.2 <- as.data.frame(a.lib.size.1$library_size)
+
+#ASV IDs as row names
+rownames(a.lib.size.2) <- rownames(a.lib.size.1)
+
+#rename column as 'taxonomy'
+names(a.lib.size.2)[1] <- "Library_Size"
+
+#move row names to 1st column and name 'ASV_ID'
+a.lib.size.2 <- tibble::rownames_to_column(a.lib.size.2, "SampleID")
+
+#add row with total sequences of study
+a.lib.size.2 <- a.lib.size.2 %>%
+            bind_rows(summarise(., across(where(is.numeric), sum),
+                                   across(where(is.character), ~'Total')))
+
+# save as an R file
+saveRDS(a.lib.size.2, paste0(objects.fp, "/a.lib.size.2.rds"))
+
+#save as .txt file
+write.table(a.lib.size.2, file = paste0(output.fp, "/asvTab_library_size.txt"), 
+            sep = "\t", row.names = FALSE, col.names = TRUE)
+
+```
+  
+### Remove contaminants  
+  
+```{r}
+
+#remove only ASVs from blanks table with sufficient sequence amounts (e.g. 50 sequences)
+c <- a.blanks.T %>% filter(total > 0)
+
+#transpose ASV talbe back to samples as columns and ASVs as rows
+a.7 <- as.data.frame(t(a.6))
+
+#move row names of samples into 1st column as 'SampleID' to match column in taxonomy file
+a.7 <- tibble::rownames_to_column(a.7, "ASV_ID")
+
+#remove rows with ESVID that matches contaminant column of ESVIS
+a.8 <- subset(a.7, !(ASV_ID %in% c$ASV_ID)) 
+
+```
+
+### Filter for incorrect taxonomic assignment (e.g. eukaryotes)
+
+```{r}
+#add taxonomy columns back into ASV table with a Left Join using inner_join function from dplyr
+a.8.T <- a.8 %>% inner_join(t.2, by= "ASV_ID")
+
+#remove ASVs that are completely unassigned
+a.9 <- a.8.T %>% filter(Domain != c("NA")) 
+
+#remove ASVs that are eukaryotes (because these are 16S-amplified libraries NOT 16S) 
+a.10 <- a.9 %>% filter(Domain != c("Eukaryota")) 
+
+#r3emove ASVs that are unassigned anything below Domain level
+a.11 <- a.10 %>% filter(Phylum != "NA")
+
+#remove chloroplast that are identified as cyanobacteria
+a.12 <- a.11 %>% filter(Order != "Chloroplast")
+
+#remove mitochondria that are identified as alphaproteobacteria
+a.13 <- a.12 %>% filter(Family != "Mitochondria")
+
+# save as an R file
+saveRDS(a.13, paste0(objects.fp, "/ASV.table.13.wTax.filtered.rds"))
+
+#save as .txt file
+write.table(a.13, file = paste0(output.fp, "/asvTab_16S_wTax_filtered.txt"), 
+            sep = "\t", row.names = FALSE, col.names = TRUE)
+
+```
+
+### Format ASV table for further processing  
+
+```{r}
+#row names as SampleID column
+rownames(a.13) <- a.13$ASV_ID
+
+#remove 'SampleID' column
+a.13$ASV_ID <- NULL
+
+#remove taxonomy columns
+a.14 <- subset (a.13, select = -c(Domain:Genus))
+
+#transpose
+a.14 <- as.data.frame(t(a.14))
+```
+
+### Calculate library size of each sample after filtering
+
+```{r}
+# create row sum column
+a.lib.size.filt <- a.14 %>% mutate(library_size = rowSums(.))
+
+# re-order with greatest row sum 1st
+a.lib.size.filt <- a.lib.size.filt %>% arrange(desc(library_size))
+
+#class data frame 
+a.lib.size.filt.1 <- as.data.frame(a.lib.size.filt$library_size)
+
+#Sample IDs as row names
+rownames(a.lib.size.filt.1) <- rownames(a.lib.size.filt)
+
+#rename column
+names(a.lib.size.filt.1)[1] <- "Library_Size_Filtered"
+
+#move row names to 1st column and name 'ASV_ID'
+a.lib.size.filt.1 <- tibble::rownames_to_column(a.lib.size.filt.1, "SampleID")
+
+#add row with total sequences of study
+a.lib.size.filt.1 <- a.lib.size.filt.1 %>%
+  bind_rows(summarise(., across(where(is.numeric), sum),
+                      across(where(is.character), ~'Total')))
+
+# save as an R file
+saveRDS(a.lib.size.filt.1, paste0(objects.fp, "/a.lib.size.filt.1.rds"))
+
+#save as .txt file
+write.table(a.lib.size.filt.1, file = paste0(output.fp, "/asvTab_library_size_filtered.txt"), 
+            sep = "\t", row.names = FALSE, col.names = TRUE)
+
+```
+
+### Save library size before and after  
+
+```{r}
+#add taxonomy columns back into ASV table with a Left Join using inner_join function from dplyr
+lib.size.final <- a.lib.size.2 %>% inner_join(a.lib.size.filt.1, by= "SampleID")
+
+# create row sum column
+lib.size.final.1 <- lib.size.final %>% mutate(filtered = Library_Size - Library_Size_Filtered)
+
+# save as an R file
+saveRDS(lib.size.final.1, paste0(objects.fp, "/lib.size.final.1.rds"))
+
+#save as .txt file
+write.table(lib.size.final.1, file = paste0(output.fp, "/Library_Size_final.txt"), 
+            sep = "\t", row.names = FALSE, col.names = TRUE)
+
+#visualize filtering
+#ggplot(lib.size.final.1, aes(x= , y = SampleID)) + geom_point() # w/ blanks: color=Sample_or_Control
+
+#ggplot(lib.size.final.1) +
+#  aes(x = filtered, color = , fill = filtered) +
+#  geom_density(alpha = 0.25) # add transparency
+
+
+```
+
+\newpage  
+## Library size    
+
+```{r kable 2, include = TRUE}
+#create table of library size align = "lcccccccc", 
+knitr::kable(lib.size.final.1, col.names = c('Sample', 'Before', 'After', 'Removed'), booktabs = T, longtable = T, linesep = "", align = "lccc", caption = 'Library Size- total number of sequences in each sample before and after filtering') %>%
+  kableExtra::kable_styling(font_size = 10) %>%
+  kableExtra::row_spec(0, bold = T)
+
+```
+
+```{r}
+#transpose ESV table
+a.15 <- as.data.frame(t(a.14))
+
+#move row names of samples into 1st column as 'SampleID' to match 1st column of mapping file
+a.16 <- tibble::rownames_to_column(a.15, "ASV_ID")
+
+#add taxonomy columns back into ASV table with a Left Join using inner_join function from dplyr
+a.16.T <- a.16 %>% inner_join(t.2, by= "ASV_ID")
+
+# save asv table w/ tax as .rds
+saveRDS(a.16.T, paste0(objects.fp, "/asv.wTax.patch.rds"))
+
+#save asv table w/ tax as .txt file 
+write.table(a.16.T, file = paste0(input.fp, "/ASVtable_16S_wTax_patch.txt"), 
+            sep = "\t", row.names = FALSE, col.names = TRUE)
+
+
+```
+
+```{r save map file}
+# save non-blanks mapping file subset as an R file
+saveRDS(m, paste0(objects.fp, "/m.2.rds"))
+
+#save non-blanks mapping file subset as .txt file 
+write.table(m, file = paste0(output.fp, "/map_file_patch.txt"), 
+            sep = "\t", row.names = FALSE, col.names = TRUE)
+
+```
+ 
+# END of Script  

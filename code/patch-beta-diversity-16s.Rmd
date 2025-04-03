@@ -1,0 +1,481 @@
+---
+title: "Svalbard Amplicon Patch study"
+subtitle: "  \n Beta Diversity - 16S SSU rRNA gene"
+author: "Adam J. Solon"
+date: "`r Sys.Date()`"
+#output: html_document
+output: 
+  pdf_document:
+  #includes:  
+  # in_header: my_header.txt
+  toc: TRUE
+fig_width: 8
+fig_height: 6
+fig_caption: true
+fontsize: 12pt
+#editor_options: 
+#  chunk_output_type: console
+---
+# Script Summary  
+This script analyzes the bacterial and archaeal (16S SSU rRNA gene) beta diversity of samples from soils collected in bare soils and biocrust patches near the terminus of the Midtre Lovenbreen glacier.  The overarching question: 
+
+How different are bacterial (and archaeal) communities between green or black tinted biocrusts and between those biocrusts and the surrounding bare ground.
+
+### Steps of this pipeline:  
+1.  Create and organize directories
+2.  Load R packages
+3.  Input files
+4.  Format Files
+5.  Bacteria and Archaea (16S)
+  a.  Principal Components Analysis (PCA)
+  b.  Plots 
+  c.  Statistics
+  d.  Homogeneity of Dispersion (betadisper)
+  e.  Plots
+  f.  Statistics
+6. Save files and figures
+  
+```{r echo = FALSE, include = FALSE, set.seed(461)}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(include = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(cache = TRUE)
+
+```
+
+```{r}
+# Change identifiers to your system and file naming. 
+user <- "~" # computer user name
+folder <- "/Desktop/Svalbard"
+project <- "/Patches"
+analyses <- "/analyses"
+data  <- "/dna_seq/amplicons"
+analysis2 <- "/BD_beta_diversity/16S"
+ecosystem <- "glacial forefields - Svalbard" # Define the environment for use in report language.
+project.fp <- paste0(user, folder, project)
+```
+
+# Begin pipeline
+
+### Set paths for Beta Diversity analyses  
+
+```{r set paths for project}
+# First define the project and project folders. 
+
+# Create project directory
+###################################################
+project.fp <- paste0(user, folder, project)
+if (!dir.exists(project.fp)) dir.create(project.fp)
+
+# Create sub-directory for all analyses for project 
+###################################################
+analyses.fp <- paste0(project.fp, analyses)
+if (!dir.exists(analyses.fp)) dir.create(analyses.fp)
+
+# Create sub-directory for data type 
+###################################################
+data.fp <- paste0(analyses.fp, data)
+if (!dir.exists(data.fp)) dir.create(data.fp)
+
+# Create sub-directory for specific analysis 
+###################################################
+analysis2.fp <- paste0(data.fp, analysis2)
+if (!dir.exists(analysis2.fp)) dir.create(analysis2.fp)
+
+# Create sub-directories for analysis 
+###################################################
+
+# Create directory for 'before' pipeline inputs
+input.fp <- paste0(analysis2.fp, "/input")
+if (!dir.exists(input.fp)) dir.create(input.fp)
+
+# Create directory for 'within' pipeline R objects 
+objects.fp <- paste0(analysis2.fp, "/objects")
+if (!dir.exists(objects.fp)) dir.create(objects.fp)
+
+# Create directory for 'after' pipeline outputs 
+output.fp <- paste0(analysis2.fp, "/output")
+if (!dir.exists(output.fp)) dir.create(output.fp)
+
+# Check for the folders here as a sanity check. Should see "Input" and "Objects" if starting from scratch.
+list.files(analysis2.fp) 
+
+```
+
+### Session Information  
+
+```{r Install and load packages}
+# install.packages("tidyverse")
+# install.packages("knitr")
+# install.packages("kableExtra")
+# install.packages("vegan")
+# install.packages("RVAideMemoire")
+# install.packages("remotes")
+# remotes::install_github("gavinsimpson/ggvegan")
+
+library(tidyverse); packageVersion("tidyverse")
+library(knitr); packageVersion("knitr")
+library(kableExtra); packageVersion("kableExtra")
+library(vegan); packageVersion("vegan") 
+library(ggvegan); packageVersion("ggvegan")
+library(RVAideMemoire); packageVersion("RVAideMemoire")
+
+```  
+  
+* r version: `r getRversion()`
+* RStudio version: `r rstudioapi::versionInfo()$version`
+* r packages:  
+  tidyverse, `r packageVersion("tidyverse")`  
+  knitr, `r packageVersion("knitr")`  
+  kableExtra, `r packageVersion("KableExtra")`  
+  vegan, `r packageVersion("vegan")`  
+  ggvegan, `r packageVersion("ggvegan")`  
+  BiodiversityR, `r packageVersion("BiodiversityR")`  
+  RVAideMemoire, `r packageVersion("RVAideMemoire")`  
+  
+### Input files for Bonney Basin  
+1. ASV table filtered and subsest through r script - 'MCosms_II_seq_processing_16s.r'
+2. Mapping file subset through r script - 'MCosms_II_seq_processing_16s.r'
+  
+```{r input data files, include = FALSE}
+# input data files
+# ASV Table (from DADA2)
+asvTable.fp <- paste0(input.fp, "/ASVTable_16S_wTax_patch.txt") 
+
+# Mapping File (metadata relevant for study samples)
+mappingFile.fp <- paste0(input.fp, "/map_file_patch.txt") 
+
+#input 16S ASV table w/ taxonomy
+a <- read.table(asvTable.fp, header = T, sep = "\t")
+
+#input metadata (i.e. mapping file)
+m <- read.table(mappingFile.fp, header = T, sep = "\t")
+
+```
+
+### Format files for use in beta diversity analyses  
+1. Subset ASV table without bulk samples (i.e. only samples exposed to experimental conditions)
+2. Transform ASV table with all samples with an Aitchison transformation ('rCLR'- Martino et al. 2019)
+3. Transform ASV table without bulk samples with an Aitchison transformation ('rCLR')
+  
+```{r format}
+#Remove taxonomy columns from ASV table
+#create data frame of only taxonomy
+t <- a %>% select(ASV_ID, Domain, Phylum, Class, Order, Family, Genus)
+
+#remove taxonomy columns from ASV table
+a.1 <- a %>% select(ASV_ID:P2.6B)
+
+#assign rownames as ASV IDs
+rownames(a.1) <- a.1$ASV_ID
+
+#remove ASV_ID column
+a.1$ASV_ID <- NULL
+
+#transpose
+a.2 <- as.data.frame(t(a.1))
+
+```
+  
+```{r aitchison transformation}
+#Transform ASV sequence 'count' data with robust centered log-ratio (rCLR) in keeping with principles of compositional data (CODA). For rCLR see Martino et al. 2019
+a.rclr.1 <- decostand(a.2, method = "rclr")
+
+```
+# All Bacteria & Archaea  
+## Principal Components Analysis (PCA)  
+
+```{r RDA 1}
+#canonical (or 'constrained') ordination
+#PCA = RDA with no explanatory variables
+pca.1 <- vegan::rda(a.rclr.1)
+
+#output of rda
+summary(pca.1)
+
+```
+
+```{r autoplot 1}
+#plot in ggplot
+autoplot(pca.1, 
+         geom = "text", 
+         layers = c("sites", "centroids"), 
+         legend = "none")
+
+#ggplot RDA plot
+#format data frames with values from RDA and mapping file
+smry.1 <- summary(pca.1)
+df1  <- data.frame(smry.1$sites[ , 1:2])       # PCA1 and PCA2
+df1 <- tibble::rownames_to_column(df1, "SampleID")
+df1$type <- m$Type
+
+#
+#df1.1  <- data.frame(smry.1$biplot[ ,1:2])     # loadings for a biplot 
+
+```
+  
+Variation Explained by Axes    
+```{r variation explained 1, include = TRUE}
+#summary of each axis
+smry.1$cont
+
+```
+
+```{r make plot 1}
+#ggplot w/ samples (i.e. sites) plotted and colored by distance from glacier
+pca.plot.1 <- ggplot(df1, 
+                   aes(x = PC1, 
+                       y = PC2,
+                       color = type)) + 
+  geom_text(aes(label = SampleID),
+            size=4) +
+  geom_hline(yintercept=0, 
+           linetype="dotted") +
+  geom_vline(xintercept=0, 
+             linetype="dotted") +
+  coord_fixed() +
+  theme_classic()
+
+```
+
+\newpage   
+### Plot - All Samples
+```{r display plot 1,  include = TRUE, fig.cap = "PCA of 16S marker gene from Patches of biocrust and bare soils of the glacial forefield of Midtre Lovenbreen on Svalbard. Each sample is marked by Sample ID and colored according to surface cover type."}
+#display plot
+pca.plot.1
+
+```
+  
+```{r make figure 1}
+#reorder factor (type), so P and NP will be green
+df1$type <- factor(df1$type, levels = c('Bare', 'Black', 'Green'))
+
+#ggplot w/ samples (i.e. sites) plotted and colored by type group
+hull.1 <- df1 %>%
+  group_by(type) %>%
+  slice(chull(PC1, PC2))
+
+#plot
+pca.fig.1 <- ggplot(df1, aes(PC1, PC2, color = type))+ 
+  geom_point(aes(fill = type), shape = 21, color = "black", size = 6)+
+  coord_fixed() +
+  geom_polygon(aes(fill = type), data = hull.1, alpha = 0.5) +
+  scale_colour_manual(values= c("tan", "#333300", "#018571")) +
+  scale_fill_manual(values= c("tan", "#333300", "#018571")) +
+  annotate("text", x = 1.2, y = -1.22, label = "Bare", size = 10) +
+  annotate("text", x = -3.20, y = -0.5, label = "Black", size = 10) +
+  annotate("text", x = -0.75, y = 1.70, label = "Green", size = 10) +
+  theme_classic() +
+  theme(panel.background = element_rect(fill = 'gray97'),
+        panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.5),
+        legend.position = "right")
+
+```
+
+\newpage   
+### Figure - All Samples
+```{r display figure 1, include = TRUE, fig.cap = "PCA of 16S marker gene from patches of biocrust and bare soils from the glacial forefield of Midtre Lovenbreen on Svalbard Each sample is marked by a circle coloread according to surface cover type."}
+#display plot
+pca.fig.1
+
+```
+  
+\newpage  
+### Statistics  
+PerMANOVA (Borcard et al. 2011)  
+  
+```{r stats 1a, include = TRUE}
+#permutation, global test of RDA result
+pnova.1 <- adonis2(a.rclr.1 ~  type, data = df1, method = 'euc', step = 999)
+
+#summary of cca
+print(pnova.1)
+
+```
+
+Pairwise PerMANOVA 
+```{r stats 1b, include = TRUE}
+#pairwise tests
+pnova.1.pw <- pairwise.perm.manova(dist(a.rclr.1, "euclidean"), m$Type, nperm=999)
+
+#summary
+pnova.1.pw
+
+#combine summary outputs as object 
+out.1 <- capture.output(print(pnova.1), print(pnova.1.pw))
+
+```
+
+## Homogeneity of Dispersion  
+Test of multivariate homogeneity of dispersion (Anderson et al. 2006) 
+```{r stats 1c, include = TRUE}
+#Homogeneity of dispersion- test multivariate dispersion (variance) for each group by calculating the average type of each sample within a group to the group centroid or spatial median. 
+
+#compute dissimilarity index from community data matrix (note- 'rclr' used in PCA is the same as 'robust.aitchison')
+dist.1 <- vegdist(a.2, method = "robust.aitchison")
+
+#calculate dispersions
+bd.1 <- betadisper(dist.1, 
+                   m$Type, 
+                   type = "median", 
+                   bias.adjust = TRUE)
+
+#display results
+print(bd.1)
+
+```
+  
+### Statistics
+```{r stats 1d, include = TRUE}
+#test for differences in dispersion among groups, permutation test
+bd.perm.1 <- permutest(bd.1, pairwise = TRUE, permutations = 999)
+
+#display
+print(bd.perm.1)
+
+#combine summary outputs as object 
+out.2 <- capture.output(print(bd.1), print(bd.perm.1))
+```
+  
+### Plot - All Samples
+```{r dispersion boxplot}
+#display dispersion with boxplot
+boxplot(bd.1)
+
+```
+  
+```{r dispersion figure 1}
+#extract values from 'list' object 
+bd.1.dst <- as.data.frame(bd.1$distances)
+bd.1.grp <- as.data.frame(bd.1$group)
+
+#create data frame
+bd.1.df <- as.data.frame(cbind(bd.1.dst, bd.1.grp))
+
+#rename columns
+bd.1.df <- bd.1.df %>% rename('Group' = 'bd.1$group', 'Distance_to_Spatial_Median' = 'bd.1$distances')
+
+#classify as factor to display by descending value
+bd.1.df$Group = factor(bd.1.df$Group, levels = c('Bare', 'Black', 'Green'))
+
+#make a figure quality boxplot of the dispersion output
+bd.1.box <- ggplot(bd.1.df, aes(x = Group, y = Distance_to_Spatial_Median, fill = Group))  +
+  geom_boxplot() +
+  labs(x = NULL, 
+       y = "Distance to Spatial Median", 
+       title = NULL,
+       fill = NULL) + 
+  scale_x_discrete(labels= c('Bare', 'Black', 'Green'), expand = c(0.2,0), drop = FALSE) +
+  scale_fill_manual(values = c("#DFC27D", "#333300", "#018571")) + #color blind friendly palette - RColorBrewer
+  scale_y_continuous(limits= c(0, 25), expand = c(0,0),
+                     breaks = c(0, 5, 10, 15, 20, 25)) +
+  theme_bw() + 
+    theme(axis.title.y = element_text(size = 14, face = "bold"), 
+          axis.text.y = element_text(size = 10, face="bold"),
+          axis.text.x = element_text(size = 14, face="bold"),
+          strip.text.x = element_text(size = 20),
+          panel.grid.minor.x = element_blank(),
+          panel.grid.major.x = element_blank(),
+          panel.grid.minor.y = element_blank(),
+          panel.background = element_rect(fill = 'whitesmoke'),
+          panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.5),
+          legend.position = "none")
+
+```
+  
+\newpage 
+### Figure - All Samples
+```{r display dispersion figure 1, include = TRUE, fig.cap= "Boxplot of the average distance to spatial median of bacterial assemblages for each surface cover type."}
+#display
+bd.1.box
+
+```
+  
+
+### Save RDA file and figure
+```{r save 1, include = FALSE}
+#check and set working directory
+setwd("~/Desktop/Svalbard/Patches/analyses/dna_seq/amplicons/BD_beta_diversity/16S")
+getwd()
+
+#RDA ordination (w/o bulk samples)
+saveRDS(pca.fig.1, paste0(objects.fp, "/pca.fig.1.rds"))
+
+#save plot as pdf
+pdf("output/patch_16s_pca.pdf",         # File name
+    width =11, height = 8.5, # Width and height in inches
+    bg = "white",          # Background color
+    colormodel = "cmyk",  # Color model (cmyk is required for most publications)
+    paper = "USr")          # Paper size-- portrait: a4", "letter", "legal" (or "us") | landscape: "a4r" and "USr"
+
+#plot
+pca.fig.1
+
+# Closing the graphical device
+dev.off() 
+
+#Save as jpg
+jpeg(filename = "output/patch_16s_pca.jpeg", 
+     width = 600, 
+     height = 600, 
+     units = "px", 
+     pointsize = 12, 
+     quality = 100, 
+     bg = "white", 
+     res = NA)
+
+#plot
+pca.fig.1
+
+# Close device
+dev.off()
+
+#Dispersion boxplots 
+saveRDS(bd.1.box, paste0(objects.fp, "/patch.1.box.rds"))
+
+#save plot as pdf
+pdf("output/patch_16s_bd.1.box.pdf",         # File name
+    width =11, height = 8.5, # Width and height in inches
+    bg = "white",          # Background color
+    colormodel = "cmyk",  # Color model (cmyk is required for most publications)
+    paper = "USr")          # Paper size-- portrait: a4", "letter", "legal" (or "us") | landscape: "a4r" and "USr"
+
+#plot
+bd.1.box
+
+# Closing the graphical device
+dev.off() 
+
+#Save as jpg
+jpeg(filename = "output/patch_16s_bd.1.box.jpeg", 
+     width = 800, 
+     height = 600, 
+     units = "px", 
+     pointsize = 12, 
+     quality = 100, 
+     bg = "white", 
+     res = NA)
+
+#plot
+bd.1.box
+
+# Close device
+dev.off()
+
+#save stats
+#save permanova as .txt file
+writeLines(out.1, con = file("patches_16s_pmanova_pw_1.txt"))
+
+#save homogeneity of dispersion stats
+writeLines(out.2, con = file("patches_16s_betadisper_1.txt"))
+
+```
+  
+\newpage  
+# References  
+Anderson, M.J., Ellingsen, K.E. & McArdle, B.H. (2006) Multivariate dispersion as a measure of beta diversity. Ecology Letters 9, 683--693.   
+
+Borcard, D., Gillet, F., & Legendre, P. (2011). Canonical ordination. In Numerical ecology with R (Vol. 2, pp. 154-195). New York: Springer.  
+  
+Martino, C., Morton, J. T., Marotz, C. A., Thompson, L. R., Tripathi, A., Knight, R., & Zengler, K. (2019). A novel sparse compositional technique reveals microbial perturbations. MSystems, 4(1), e00016-19. 

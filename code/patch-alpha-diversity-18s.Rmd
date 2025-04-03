@@ -1,0 +1,836 @@
+---
+title: "Svalbard Midtre Lovenbreen -- Patch Study"
+subtitle: "Alpha Diversity - 18S SSU rRNA gene"
+author: "Adam J. Solon"
+date: "`r Sys.Date()`"
+#output: html_document
+output: 
+  pdf_document:
+    toc: TRUE
+    fig_width: 7
+    fig_height: 6
+    fig_caption: true
+fontsize: 12pt
+#editor_options: 
+#  chunk_output_type: console
+---
+
+# Script Summary  
+This script calculates and compares the richness, Shannon diversity, and Pielou evenness of communities of microeukaryotes (18S) across sediments in biocrust and bare surface patches in a glacial forefield chronosequence.
+
+
+### Steps of this pipeline:  
+1.  Create and organize directories
+2.  Load R packages
+3.  Input files
+4.  Format Files
+5.  Richness
+6.  Shannon
+7.  Save files and figures
+  
+```{r echo = FALSE, include = FALSE, set.seed(461)}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(include = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(cache = TRUE)
+
+```
+
+# Begin pipeline
+
+### Set paths for Taxonomic Summary analyses  
+```{r, echo = FALSE, include = FALSE}
+# Change identifiers to your system and file naming
+user <- "F:"
+folder <- "/Projects"
+project <- "/Sunspears"
+study <- "/Studies"
+files <- "/Patch_Schmidt-et-al"
+
+directory.1 <- "/analyses/amplicons/18s"
+
+analysis.1 <- "/alpha_diversity"
+
+ecosystem <- "glacial forefield - Svalbard" # Define the environment for use in report language.
+
+```
+
+```{r set paths for pipeline}
+# First define the project and project folders. 
+
+# Create pathway for pipeline
+###################################################
+path.fp <- paste0(user, folder, project, study, files)
+if (!dir.exists(path.fp)) dir.create(path.fp)
+
+```
+
+```{r set path for analyses}
+#directory.1
+###################################################
+directory.1.fp <- paste0(path.fp, directory.1)
+if (!dir.exists(directory.1.fp)) dir.create(directory.1.fp)
+
+# Create sub-directory  analysis.1
+###################################################
+analysis.1.fp <- paste0(directory.1.fp, analysis.1)
+if (!dir.exists(analysis.1.fp)) dir.create(analysis.1.fp)
+
+# Create sub-directories for analysis 
+###################################################
+
+# Create directory for 'within' pipeline R objects 
+objects.fp <- paste0(analysis.1.fp, "/objects")
+if (!dir.exists(objects.fp)) dir.create(objects.fp, recursive = TRUE)
+
+# Create directory for 'after' pipeline outputs 
+output.fp <- paste0(analysis.1.fp, "/output")
+if (!dir.exists(output.fp)) dir.create(output.fp, recursive = TRUE)
+
+# Create directory for 'after' pipeline outputs 
+sub.1.fp <- paste0(output.fp, "/stats")
+if (!dir.exists(sub.1.fp)) dir.create(sub.1.fp, recursive = TRUE)
+
+# Create directory for 'after' pipeline outputs 
+sub.2.fp <- paste0(output.fp, "/plots")
+if (!dir.exists(sub.2.fp)) dir.create(sub.2.fp, recursive = TRUE)
+
+# Check for the folders here as a sanity check. Should see "Input" and "Objects" if starting from scratch.
+list.files(analysis.1.fp) 
+
+```
+
+### Session Information  
+```{r Install and load packages}
+# install.packages("tidyverse")
+# install.packages("knitr")
+# install.packages("kableExtra")
+# install.packages("reshape2")
+# install.packages("vegan")
+# install.packages("phyloseq")
+# install.packages("FSA")
+# install.packages("multcomp")
+# install.packages("multcompView")
+# install.packages("grDevices")
+# install.packages("gratia")
+
+library(tidyverse); packageVersion("tidyverse")
+library(knitr); packageVersion("knitr")
+library(kableExtra); packageVersion("kableExtra")
+library(reshape2); packageVersion("reshape2") 
+library(vegan); packageVersion("vegan") 
+library(phyloseq); packageVersion("phyloseq")
+library(FSA); packageVersion("FSA")
+library(multcomp); packageVersion("multcomp")
+library(multcompView); packageVersion("multcompView")
+library(grDevices); packageVersion("grDevices")
+library(gratia); packageVersion("gratia")
+
+```  
+
+* r version: `r getRversion()`
+* RStudio version: `r rstudioapi::versionInfo()$version`
+* r packages:  
+  tidyverse, `r packageVersion("tidyverse")`  
+  knitr, `r packageVersion("knitr")`  
+  kableExtra, `r packageVersion("KableExtra")`  
+  vegan, `r packageVersion("vegan")`  
+  phyloseq, `r packageVersion("phyloseq")` 
+  reshape2, `r packageVersion("reshape2")`
+  FSA, `r packageVersion("FSA")`  
+  multcomp, `r packageVersion("multcomp")` 
+  multcompView, `r packageVersion("multcompView")` 
+  grDevices, `r packageVersion("grDevices")` 
+  gratia, `r packageVersion("gratia")`
+  
+### Input files  
+Phyloseq objects from script 'patch-normalization-transformation-18s.Rmd' 
+
+```{r import phyloseq object}
+#input phyloseq object with raw, transformed sequence counts
+phy.2 <- readRDS("F:/Projects/Sunspears/Studies/Patch_Schmidt-et-al/analyses/amplicons/18s/norm_transform/objects/phy.2.rds")
+
+```
+
+### Format files  
+```{r format & transform data 1}
+#convert phyloseq object into data.frame
+df.rw <- psmelt(phy.2)
+
+# Use the dcast function to reshape the dataframe
+a <- dcast(df.rw, Sample ~ OTU, value.var = "Abundance")
+
+#sample ID to rownames
+rownames(a) <- a$Sample
+
+#remove Sample column
+a$Sample <- NULL
+
+#convert to matrix
+a <- as.matrix(a)
+
+#convert phyloseq object into metadata table - data.frame
+m <- as(sample_data(phy.2), "data.frame")
+
+##reorder levels of the factor Patch_type
+m$Patch_type <- factor(m$Patch_type, levels=c("colony", "bare"))
+
+##reorder levels of the factor Color
+m$Color <- factor(m$Color, levels=c("green", "black", "bare"))
+
+# Get a vector of sample IDs
+samples <- unique(m$SampleID)
+
+# Determine number of sequences to use as cut-off for rarefy
+raremax <- min(rowSums(a, na.rm = TRUE))
+
+```
+
+```{r calculate alpha diversity metrics, eval = FALSE}
+# Initialize a data frame to store iteration results
+iteration_results <- data.frame()
+
+# Define samples and raremax
+samples <- unique(m$SampleID)
+raremax <- min(rowSums(a))
+
+# First Loop: Iterate over each sample ID and perform 1000 iterations
+for(sam in samples) {
+  # Subset data for the current sample
+  sample_data <- a[rownames(a) == sam, , drop = FALSE]
+  
+  # Iterate 1000 times
+  for(i in 1:1000) {
+    # Suppress warnings for rarefaction and diversity calculations
+    suppressWarnings({
+      # Rarefy data
+      rarefaction <- rrarefy(sample_data, 155)
+      
+      # Calculate Richness and Shannon diversity
+      richness <- specnumber(rarefaction)
+      shannon <- diversity(rarefaction, index = "shannon")
+      
+      # Calculate Evenness
+      evenness <- shannon / log(richness)
+    })
+    
+    # Store results in iteration_results dataframe
+    iteration_results <- rbind(iteration_results, data.frame(SampleID = sam, Iteration = i, Richness = richness, Shannon = shannon, Evenness = evenness))
+  }
+}
+
+# Merge iteration_results with m to add Patch_type
+div.res <- merge(iteration_results, m[, c("SampleID", "Patch_type","Color")], by = "SampleID")
+
+# Save model output
+saveRDS(div.res, paste0(objects.fp, "/div.res.rds"))
+
+```
+
+```{r input files}
+# Load your data (replace 'your_data' with your actual data)
+#import R object-
+div.res <- readRDS("F:/Projects/Sunspears/Studies/Patch_Schmidt-et-al/analyses/amplicons/18s/alpha_diversity/objects/div.res.rds")
+
+```
+
+```{r check output}
+# Print iteration results
+head(div.res)
+
+```
+
+### Richness 
+```{r plot Evenness}
+# Create boxplot for richness with facets by Patch_type
+ggplot(div.res, aes(x=SampleID, y=Richness)) +
+  geom_boxplot(fill="blue", alpha=0.5, width=0.5) +
+  labs(title="Boxplot of Average Richness", y="Rarefaction Richness", x="Samples") +
+  theme_bw() +
+  facet_wrap(~ Patch_type, scales = "free_x", ncol = 3, shrink = TRUE) +
+theme(axis.text.x = element_text(size = 8, angle = 45, hjust = 1))
+
+```
+
+```{r scatterplot richness}
+# Create scatterplot
+ggplot(div.res, aes(x=Patch_type, y=Richness)) +
+  geom_jitter(Patch_type="grey", alpha=0.5, width=0.2) +
+  #stat_summary(fun.data=mean_se, geom="errorbar", Patch_type="black", width=0.2) +
+  stat_summary(fun.data=mean_cl_normal, geom="errorbar", Patch_type="black", width=0.2) +
+  stat_summary(fun=mean, geom="point", Patch_type="black", size=3) +
+  labs(title="Scatterplot of Richness by patch type", y="Rarefaction Richness", x="patch type") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+### Shannon 
+```{r plot shannon}
+# Create boxplot for Shannon
+ggplot(div.res, aes(x=SampleID, y= Shannon)) +
+  geom_boxplot(fill="blue", alpha=0.5) +
+  labs(title="Boxplot of Average Shannon Diversity Index", y="Shannon Diversity", x="Sample ID") +
+  theme_bw() +
+  facet_wrap(~ Patch_type, scales = "free_x", ncol = 3, shrink = TRUE) +
+  theme(axis.text.x = element_text(size = 8, angle = 45, hjust = 1))
+
+```
+
+```{r scatterplot Shannon}
+# Create scatterplot
+ggplot(div.res, aes(x=Patch_type, y=Shannon)) +
+  geom_jitter(Patch_type="grey", alpha=0.5, width=0.2) +
+  #stat_summary(fun.data=mean_se, geom="errorbar", Patch_type="black", width=0.2) +
+  stat_summary(fun.data=mean_cl_normal, geom="errorbar", Patch_type="black", width=0.2) +
+  stat_summary(fun=mean, geom="point", Patch_type="black", size=3) +
+  labs(title="Scatterplot of Shannon by patch type", y="Shannon Diversity", x="patch type") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+### Evenness 
+```{r plot Evenness}
+# Create boxplot for Evenness
+ggplot(div.res, aes(x=SampleID, y= Evenness)) +
+  geom_boxplot(fill="blue", alpha=0.5) +
+  labs(title="Boxplot of Average Evenness Diversity Index", y="Evenness Diversity Index", x="Sample ID") +
+  theme_bw() +
+  facet_wrap(~ Patch_type, scales = "free_x", ncol = 3, shrink = TRUE) +
+  theme(axis.text.x = element_text(size = 8, angle = 45, hjust = 1))
+
+```
+
+```{r scatterplot Evenness}
+# Create scatterplot
+ggplot(div.res, aes(x=Patch_type, y=Evenness)) +
+  geom_jitter(Patch_type="grey", alpha=0.5, width=0.2) +
+  #stat_summary(fun.data=mean_se, geom="errorbar", Patch_type="black", width=0.2) +
+  stat_summary(fun.data=mean_cl_normal, geom="errorbar", Patch_type="black", width=0.2) +
+  stat_summary(fun=mean, geom="point", Patch_type="black", size=3) +
+  labs(title="Scatterplot of Evenness by patch type", y="Evenness Diversity", x="patch type") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+\newpage 
+### Are there differences in means between different Patch Types?  
+```{r average alpha diversity metrics}
+# Initialize a data frame to store mean results
+average_results <- data.frame()
+
+# Second Loop: Compute the means for each sample
+for(sam in samples) {
+  # Subset data for the current sample
+  sample_data <- div.res[div.res$SampleID == sam, ]
+  
+  # Calculate mean Richness, Evenness, and Shannon diversity
+  mean_richness <- mean(sample_data$Richness, na.rm = TRUE)
+  mean_shannon <- mean(sample_data$Shannon, na.rm = TRUE)
+  mean_Evenness <- mean(sample_data$Evenness, na.rm = TRUE)
+  
+  # Store results in average_results dataframe
+  average_results <- rbind(average_results, data.frame(SampleID = sam, 
+                                                       Mean.Richness = round(mean_richness, 0),
+                                                       Mean.Shannon = round(mean_shannon, 2),
+                                                       Mean.Evenness = round(mean_Evenness, 2)))
+}
+
+```
+
+```{r add patch info}
+# Merge average_results with m to add Patch_type
+avg.res <- merge(average_results, m[, c("SampleID", "Patch_type", "Color")], by = "SampleID")
+
+```
+
+```{r check dataframe 2}
+#rownames
+avg.res.1 <- avg.res %>% 
+  column_to_rownames(var = "SampleID")
+
+#re-order/rename columns
+avg.res.2 <- avg.res.1 %>%
+  dplyr::rename(Patch = Patch_type, Richness = Mean.Richness, Shannon = Mean.Shannon, Evenness = Mean.Evenness) %>%
+  dplyr::select(4, 1:3)
+
+#set patch as factor
+avg.res.2$Patch <- as.factor(avg.res.2$Patch)
+
+# Print mean results
+print(avg.res.2)
+
+```
+
+# Summary Statistics
+```{r define functions}
+# Function to calculate standard error
+standard_error <- function(x) {
+  sd(x) / sqrt(length(x))
+}
+
+# Function to calculate 95% confidence intervals
+confidence_interval <- function(x) {
+  se <- standard_error(x)
+  mean_x <- mean(x)
+  ci <- qt(0.975, df = length(x) - 1) * se
+  c(lower = mean_x - ci, upper = mean_x + ci)
+}
+
+```
+
+### Richness 
+```{r richness average by patch type}
+# Group by Soil_Age and summarize with rounded values
+avg.soil.age.res.rich <- avg.res.2 %>%
+  group_by(Patch) %>%
+  summarise(
+    n = n(),
+    mean = round(mean(Richness, na.rm = TRUE)),
+    se = round(standard_error(Richness)),
+    ci_lower = round(confidence_interval(Richness)[1]),
+    ci_upper = round(confidence_interval(Richness)[2])
+  )
+
+# View the resulting dataframe
+print(avg.soil.age.res.rich)
+
+```
+
+### Shannon 
+```{r shannon average by patch type}
+# Group by Soil_Age and summarize with rounded values
+avg.soil.age.res.shan <- avg.res.2 %>%
+  group_by(Patch) %>%
+  summarise(
+    n = n(),
+    mean = round(mean(Shannon, na.rm = TRUE), 2),
+    se = round(standard_error(Shannon), 2),
+    ci_lower = round(confidence_interval(Shannon)[1], 2),
+    ci_upper = round(confidence_interval(Shannon)[2], 2)
+  )
+
+# View the resulting dataframe
+print(avg.soil.age.res.shan)
+
+```
+
+### Evenness 
+```{r Evenness average by patch type}
+# Group by Soil_Age and summarize with rounded values, sample P2.2B has a value of NaN b/c it has a richness of 1 so remove before calculating
+avg.soil.age.res.even <- avg.res.2 %>%
+  filter(row.names(.) != "P2.2B") %>%
+  group_by(Patch) %>%
+  summarise(
+    n = n(),
+    mean = round(mean(Evenness, na.rm = TRUE), 3),
+    se = round(standard_error(Evenness), 3),
+    ci_lower = round(confidence_interval(Evenness)[1], 3),
+    ci_upper = round(confidence_interval(Evenness)[2], 3)
+  )
+
+# View the resulting dataframe
+print(avg.soil.age.res.even)
+
+```
+
+# Difference in Means? 
+## Richness
+```{r test diff in means - rich, include = TRUE}
+# Extract residuals
+t.test.rich <- t.test(Richness ~ Patch, data = avg.res.2)
+print(t.test.rich)
+
+```
+
+\newpage 
+### Scatterplot 
+```{r scatterplot avg. richness}
+# Create scatterplot
+p.rich <- ggplot(avg.res.2, aes(x= Patch, y= Richness)) +
+  geom_boxplot(aes(fill = Patch)) +
+  geom_jitter(size= 4, shape= 1, color = "black", width = 0.08) +
+  scale_y_continuous(expand = c(0.0, 0.0), limits = c(0, 41), breaks = c(0, 10, 20, 30, 40)) +
+  scale_x_discrete(labels = c("colony" = "Colonies", "bare" = "Bare Sediment"), expand = c(0.4, 0.1), drop = FALSE) +
+  scale_fill_manual(values= c("#018571", "tan")) + # Patch_type blind friendly palette - RPatch_typeBrewer
+  guides(fill = "none") +
+  labs(y = "Observed Richness") +
+  annotate("text", x = 1, y = 39.5, label = "a", size = 6) +
+  annotate("text", x = 2, y = 39.5, label = "b", size = 6) +
+  theme_bw() + 
+  theme(axis.title.y = element_text(size = 20, face = "bold"), 
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(size = 18, face = "bold"),
+        axis.text.y = element_text(size = 18),
+        strip.text.x = element_text(size = 30),
+        axis.ticks.x.top = element_blank(),  # Remove tick marks on top
+        axis.text.x.top = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.y = element_blank())
+
+#display
+p.rich
+
+```
+
+\newpage 
+## Shannon 
+```{r test diff in means - shan, include = TRUE}
+# Extract residuals
+t.test.shan <- t.test(Shannon ~ Patch, data = avg.res.2)
+print(t.test.shan)
+
+```
+ 
+\newpage 
+### Scatterplot 
+```{r scatterplot avg. Shannon 1}
+# Create scatterplot
+p.shan.1 <- ggplot(avg.res.2, aes(x= Patch, y= Shannon)) +
+  geom_boxplot(aes(fill = Patch)) +
+  geom_jitter(size= 4, shape= 1, Patch_type = "black", width = 0.08) +
+  scale_y_continuous(expand = c(0.0, 0.0), limits = c(-0.01, 5.1), breaks = c(0, 1.0, 2.0, 3.0, 4.0, 5.0)) +
+  scale_x_discrete(labels = c("colony" = "Colonies", "bare" = "Bare Sediment"), expand = c(0.4, 0.1), drop = FALSE) +
+  scale_fill_manual(values= c("#018571", "tan")) + # Patch_type blind friendly palette - RPatch_typeBrewer
+  guides(fill = "none") +
+  labs(y = "Shannon Diversity") +
+  #annotate("text", x = 1, y = 2, label = "a", size = 6) +
+  #annotate("text", x = 2, y = 2, label = "a", size = 6) +
+  theme_bw() + 
+  theme(axis.title.y = element_text(size = 20, face = "bold"), 
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(size = 18, face = "bold"),
+        axis.text.y = element_text(size = 18),
+        strip.text.x = element_text(size = 30),
+        axis.ticks.x.top = element_blank(),  # Remove tick marks on top
+        axis.text.x.top = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.y = element_blank())
+
+#display
+p.shan.1
+
+```
+
+\newpage 
+```{r scatterplot avg. Shannon 2}
+# Create scatterplot
+p.shan.2 <- ggplot(avg.res.2, aes(x= Patch, y= Shannon)) +
+  geom_boxplot(aes(fill = Patch)) +
+  geom_jitter(size= 4, shape= 1, Patch_type = "black", width = 0.08) +
+  scale_y_continuous(expand = c(0.0, 0.0), limits = c(0, 3.28), breaks = c(0, 1.0, 2.0, 3.0)) +
+  scale_x_discrete(labels = c("colony" = "Colonies", "bare" = "Bare Sediment"), expand = c(0.4, 0.1), drop = FALSE) +
+  scale_fill_manual(values= c("#018571", "tan")) + # Patch_type blind friendly palette - RPatch_typeBrewer
+  guides(fill = "none") +
+  labs(y = "Shannon Diversity") +
+  #annotate("text", x = 1, y = 2, label = "a", size = 6) +
+  #annotate("text", x = 2, y = 2, label = "a", size = 6) +
+  theme_bw() + 
+  theme(axis.title.y = element_text(size = 20, face = "bold"), 
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(size = 18, face = "bold"),
+        axis.text.y = element_text(size = 18),
+        strip.text.x = element_text(size = 30),
+        axis.ticks.x.top = element_blank(),  # Remove tick marks on top
+        axis.text.x.top = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.y = element_blank())
+
+#display
+p.shan.2
+
+```
+
+\newpage 
+## Evenness  
+```{r test diff in means - even, include = TRUE}
+# Extract residuals
+t.test.even <- t.test(Evenness ~ Patch, data = avg.res.2)
+print(t.test.even)
+
+```
+
+```{r scatterplot avg. Shannon}
+# Create scatterplot
+p.even <- ggplot(avg.res.2, aes(x= Patch, y= Evenness)) +
+  geom_boxplot(aes(fill = Patch)) +
+  geom_jitter(size= 4, shape= 1, Patch_type = "black", width = 0.08) +
+ scale_y_continuous(expand = c(0.0, 0.0), limits = c(0.0, 1.05), breaks = c(0, 0.2, 0.4, 0.6, 0.8, 1.0)) +
+  scale_x_discrete(labels = c("colony" = "Colonies", "bare" = "Bare Sediment"), expand = c(0.4, 0.1), drop = FALSE) +
+  scale_fill_manual(values= c("#018571", "tan")) + # Patch_type blind friendly palette - RPatch_typeBrewer
+  guides(fill = "none") +
+  labs(y = "Pielou Evenness") +
+  annotate("text", x = 1, y = 1.02, label = "a", size = 6) +
+  annotate("text", x = 2, y = 1.02, label = "b", size = 6) +
+  theme_bw() + 
+  theme(axis.title.y = element_text(size = 20, face = "bold"), 
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(size = 18, face = "bold"),
+        axis.text.y = element_text(size = 18),
+        strip.text.x = element_text(size = 30),
+        axis.ticks.x.top = element_blank(),  # Remove tick marks on top
+        axis.text.x.top = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.y = element_blank())
+
+#display
+p.even
+
+```
+
+####Objects as .rds files 
+```{r save objects}
+#average alpha diversity values per sample
+saveRDS(avg.res.2, paste0(objects.fp, "/avg.res.2.rds"))
+
+#richness scatterplot
+saveRDS(p.rich, paste0(objects.fp, "/p.rich.rds"))
+
+#shannon scatterplot
+saveRDS(p.shan.1, paste0(objects.fp, "/p.shan.1.rds"))
+
+#shannon scatterplot
+saveRDS(p.shan.2, paste0(objects.fp, "/p.shan.2.rds"))
+
+#Evenness scatterplot
+saveRDS(p.even, paste0(objects.fp, "/p.even.rds"))
+
+```
+
+###Save Files 
+```{r save combined summary stats}
+#check and set working directory
+setwd("F:/Projects/Sunspears/Studies/Patch_Schmidt-et-al/analyses/amplicons/18s/alpha_diversity/output/stats/Patch_type")
+getwd()
+
+#move rownames to column sampleID
+avg.res.3 <- avg.res.2 %>%
+  rownames_to_column(var = "SampleID")
+
+#save summary statistics
+write.csv(avg.res.3, "patch-alpha-diversity-18s-by-sample.csv", row.names = FALSE)
+
+#save summary statistics
+write.csv(avg.soil.age.res.rich, "Richness_18s_summary_stats.csv", row.names = FALSE)
+
+#save summary statistics
+write.csv(avg.soil.age.res.shan, "Shannon_18s_summary_stats.csv", row.names = FALSE)
+
+#save summary statistics
+write.csv(avg.soil.age.res.even, "Evenness_18s_summary_stats.csv", row.names = FALSE)
+
+#save pairwise comparisons
+# Save richness the results as a CSV file
+capture.output(print(t.test.rich), file = "Richness_18s_tTest.txt")
+
+#shannon
+capture.output(print(t.test.shan), file = "Shannon_18s_tTest.txt")
+
+#Evenness
+capture.output(print(t.test.even), file = "Evenness_18s_tTest.txt")
+
+```
+
+```{r save rich figures, include = FALSE}
+#check and set working directory
+setwd("F:/Projects/Sunspears/Studies/Patch_Schmidt-et-al/analyses/amplicons/18s/alpha_diversity/output/plots/Patch_type/")
+getwd()
+
+#richness
+#save plot as pdf
+pdf("richness-18s-rarefied-155.pdf",         # File name
+    width =11, height = 8.5, # Width and height in inches
+    bg = "white",          # Background Patch_type
+    colormodel = "cmyk",  # Patch_type model (cmyk is required for most publications)
+    paper = "USr")          # Paper size-- portrait: a4", "letter", "legal" (or "us") | landscape: "a4r" and "USr"
+
+#plot
+p.rich
+
+# Closing the graphical device
+dev.off() 
+
+##save pdf
+cairo_pdf("richness-18s-rarefied-155-II.pdf", width = 11, height = 8.5, family = "Helvetica")
+
+##plot to save
+p.rich
+
+##Closing the graphical device
+dev.off()
+
+#Save as jpg
+jpeg(filename = "richness-18s-rarefied-155.jpeg", 
+     width = 1000, 
+     height = 600, 
+     units = "px", 
+     pointsize = 12, 
+     quality = 100, 
+     bg = "white", 
+     res = NA)
+
+#plot
+p.rich
+
+# Close device
+dev.off()
+
+#save as .svg file
+ggsave("richness-18s-rarefied-155.svg", plot = p.rich, device = "svg", width = 11, height = 8.5, units = "in")
+
+```
+
+```{r save shan 1 figures}
+#check and set working directory
+setwd("F:/Projects/Sunspears/Studies/Patch_Schmidt-et-al/analyses/amplicons/18s/alpha_diversity/output/plots/Patch_type/")
+getwd()
+
+#shannon
+#save plot as pdf
+pdf("shannon-1-18s-rarefied-155.pdf",         # File name
+    width =11, height = 8.5, # Width and height in inches
+    bg = "white",          # Background Patch_type
+    colormodel = "cmyk",  # Patch_type model (cmyk is required for most publications)
+    paper = "USr")          # Paper size-- portrait: a4", "letter", "legal" (or "us") | landscape: "a4r" and "USr"
+
+#plot
+p.shan.1
+
+# Closing the graphical device
+dev.off() 
+
+##save pdf
+cairo_pdf("shannon-1-18s-rarefied-155-II.pdf", width = 11, height = 8.5, family = "Helvetica")
+
+##plot to save
+p.shan.1
+
+##Closing the graphical device
+dev.off()
+
+#Save as jpg
+jpeg(filename = "shannon-1-18s-rarefied-155.jpeg", 
+     width = 1000, 
+     height = 600, 
+     units = "px", 
+     pointsize = 12, 
+     quality = 100, 
+     bg = "white", 
+     res = NA)
+
+#plot
+p.shan.1
+
+# Close device
+dev.off()
+
+#save as .svg file
+ggsave("shannon-1-18s-rarefied-155.svg", plot = p.shan.1, device = "svg", width = 11, height = 8.5, units = "in")
+
+```
+
+```{r save shan 2 figures}
+#check and set working directory
+setwd("F:/Projects/Sunspears/Studies/Patch_Schmidt-et-al/analyses/amplicons/18s/alpha_diversity/output/plots/Patch_type/")
+getwd()
+
+#shannon
+#save plot as pdf
+pdf("shannon-2-18s-rarefied-155.pdf",         # File name
+    width =11, height = 8.5, # Width and height in inches
+    bg = "white",          # Background Patch_type
+    colormodel = "cmyk",  # Patch_type model (cmyk is required for most publications)
+    paper = "USr")          # Paper size-- portrait: a4", "letter", "legal" (or "us") | landscape: "a4r" and "USr"
+
+#plot
+p.shan.2
+
+# Closing the graphical device
+dev.off() 
+
+##save pdf
+cairo_pdf("shannon-2-18s-rarefied-155-II.pdf", width = 11, height = 8.5, family = "Helvetica")
+
+##plot to save
+p.shan.2
+
+##Closing the graphical device
+dev.off()
+
+#Save as jpg
+jpeg(filename = "shannon-2-18s-rarefied-155.jpeg", 
+     width = 1000, 
+     height = 600, 
+     units = "px", 
+     pointsize = 12, 
+     quality = 100, 
+     bg = "white", 
+     res = NA)
+
+#plot
+p.shan.2
+
+# Close device
+dev.off()
+
+#save as .svg file
+ggsave("shannon-2-18s-rarefied-155.svg", plot = p.shan.2, device = "svg", width = 11, height = 8.5, units = "in")
+
+```
+
+```{r save evenness figures, include = FALSE}
+#check and set working directory
+setwd("F:/Projects/Sunspears/Studies/Patch_Schmidt-et-al/analyses/amplicons/18s/alpha_diversity/output/plots/Patch_type/")
+getwd()
+
+#evenness
+#save plot as pdf
+pdf("evenness-18s-rarefied-155.pdf",         # File name
+    width =11, height = 8.5, # Width and height in inches
+    bg = "white",          # Background Patch_type
+    colormodel = "cmyk",  # Patch_type model (cmyk is required for most publications)
+    paper = "USr")          # Paper size-- portrait: a4", "letter", "legal" (or "us") | landscape: "a4r" and "USr"
+
+#plot
+p.even
+
+# Closing the graphical device
+dev.off() 
+
+##save pdf
+cairo_pdf("evenness-18s-rarefied-155-II.pdf", width = 11, height = 8.5, family = "Helvetica")
+
+##plot to save
+p.even
+
+##Closing the graphical device
+dev.off()
+
+#Save as jpg
+jpeg(filename = "evenness-18s-rarefied-155.jpeg", 
+     width = 1000, 
+     height = 600, 
+     units = "px", 
+     pointsize = 12, 
+     quality = 100, 
+     bg = "white", 
+     res = NA)
+
+#plot
+p.even
+
+# Close device
+dev.off()
+
+#save as .svg file
+ggsave("evenness-18s-rarefied-155.svg", plot = p.even, device = "svg", width = 11, height = 8.5, units = "in")
+
+```
+
+#End of Script 

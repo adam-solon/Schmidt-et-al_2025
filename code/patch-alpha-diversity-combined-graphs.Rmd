@@ -1,0 +1,398 @@
+---
+title: "Svalbard Midtre Lovenbreen -- Patch Study"
+subtitle: "Alpha Diversity - 16S SSU rRNA gene"
+author: "Adam J. Solon"
+date: "`r Sys.Date()`"
+#output: html_document
+output: 
+  pdf_document:
+    toc: TRUE
+    fig_width: 7
+    fig_height: 6
+    fig_caption: true
+fontsize: 12pt
+#editor_options: 
+#  chunk_output_type: console
+---
+
+# Script Summary  
+This script calculates and compares the richness, Shannon diversity, and Pielou evenness of communities of bacteria & archaea (16S) across sediments in biocrust and bare surface patches in a glacial forefield chronosequence.
+
+
+### Steps of this pipeline:  
+1.  Create and organize directories
+2.  Load R packages
+3.  Input files
+4.  Format Files
+5.  Richness
+6.  Shannon
+7.  Save files and figures
+  
+```{r echo = FALSE, include = FALSE, set.seed(461)}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(include = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(cache = TRUE)
+
+```
+
+# Begin pipeline
+
+### Set paths for Taxonomic Summary analyses  
+```{r, echo = FALSE, include = FALSE}
+# Change identifiers to your system and file naming
+user <- "F:"
+folder <- "/Projects"
+project <- "/Sunspears"
+study <- "/Studies"
+files <- "/Patch_Schmidt-et-al"
+
+directory.0 <- "/analyses/amplicons/"
+#directory.1 <- "/analyses/amplicons/16s"
+#directory.2 <- "/analyses/amplicons/18s"
+
+#analysis.1 <- "/alpha_diversity"
+#analysis.2 <- "/alpha_diversity"
+
+ecosystem <- "glacial forefield - Svalbard" # Define the environment for use in report language.
+
+```
+
+```{r set paths for pipeline}
+# First define the project and project folders. 
+
+# Create pathway for pipeline
+###################################################
+path.fp <- paste0(user, folder, project, study, files)
+if (!dir.exists(path.fp)) dir.create(path.fp)
+
+```
+
+```{r set path for analyses}
+#directory.1
+###################################################
+directory.0.fp <- paste0(path.fp, directory.0)
+if (!dir.exists(directory.0.fp)) dir.create(directory.0.fp)
+
+#directory.1
+###################################################
+directory.1.fp <- paste0(path.fp, directory.1)
+if (!dir.exists(directory.1.fp)) dir.create(directory.1.fp)
+
+# Create sub-directory  analysis.1
+###################################################
+analysis.1.fp <- paste0(directory.1.fp, analysis.1)
+if (!dir.exists(analysis.1.fp)) dir.create(analysis.1.fp)
+
+#directory.2
+###################################################
+directory.2.fp <- paste0(path.fp, directory.2)
+if (!dir.exists(directory.2.fp)) dir.create(directory.2.fp)
+
+# Create sub-directory  analysis.2
+###################################################
+analysis.2.fp <- paste0(directory.2.fp, analysis.2)
+if (!dir.exists(analysis.2.fp)) dir.create(analysis.2.fp)
+
+# Create sub-directories
+###################################################
+
+# Create directory for 'within' pipeline R objects 
+objects.1.fp <- paste0(analysis.1.fp, "/objects")
+if (!dir.exists(objects.fp)) dir.create(objects.fp, recursive = TRUE)
+
+# Create directory for 'within' pipeline R objects 
+objects.2.fp <- paste0(analysis.2.fp, "/objects")
+if (!dir.exists(objects.fp)) dir.create(objects.fp, recursive = TRUE)
+
+```
+
+```{r set path for output}
+# Create directory for 'after' pipeline outputs 
+output.fp <- paste0(directory.0.fp, "/graphs")
+if (!dir.exists(output.fp)) dir.create(output.fp, recursive = TRUE)
+
+```
+
+### Session Information  
+```{r Install and load packages}
+# install.packages("tidyverse")
+# install.packages("knitr")
+# install.packages("kableExtra")
+# install.packages("reshape2")
+# install.packages("vegan")
+# install.packages("phyloseq")
+# install.packages("FSA")
+# install.packages("multcomp")
+# install.packages("multcompView")
+# install.packages("grDevices")
+# install.packages("gratia")
+
+library(tidyverse); packageVersion("tidyverse")
+library(knitr); packageVersion("knitr")
+library(kableExtra); packageVersion("kableExtra")
+library(reshape2); packageVersion("reshape2") 
+library(patchwork); packageVersion("patchwork")
+library(grDevices); packageVersion("grDevices")
+library(gratia); packageVersion("gratia")
+
+```  
+
+* r version: `r getRversion()`
+* RStudio version: `r rstudioapi::versionInfo()$version`
+* r packages:  
+  tidyverse, `r packageVersion("tidyverse")`  
+  knitr, `r packageVersion("knitr")`  
+  reshape2, `r packageVersion("reshape2")`
+  patchwork, `r packageVersion("patchwork")` 
+  grDevices, `r packageVersion("grDevices")` 
+  gratia, `r packageVersion("gratia")`
+  
+### Input files  
+ggplot objects from scripts 'patch-alpha-diversity-16s.Rmd' and 'patch-alpha-diversity-18s.Rmd' 
+
+```{r import phyloseq object}
+#input objects
+p.rich.16s <- readRDS("F:/Projects/Sunspears/Studies/Patch_Schmidt-et-al/analyses/amplicons/16s/alpha_diversity/objects/p.rich.rds")
+
+#input objects
+p.shan.16s <- readRDS("F:/Projects/Sunspears/Studies/Patch_Schmidt-et-al/analyses/amplicons/16s/alpha_diversity/objects/p.shan.rds")
+
+#input objects
+p.even.16s <- readRDS("F:/Projects/Sunspears/Studies/Patch_Schmidt-et-al/analyses/amplicons/16s/alpha_diversity/objects/p.even.rds")
+
+#input objects
+p.rich.18s <- readRDS("F:/Projects/Sunspears/Studies/Patch_Schmidt-et-al/analyses/amplicons/18s/alpha_diversity/objects/p.rich.rds")
+
+#input objects
+p.shan.18s <- readRDS("F:/Projects/Sunspears/Studies/Patch_Schmidt-et-al/analyses/amplicons/18s/alpha_diversity/objects/p.shan.1.rds")
+
+#input objects
+p.even.18s <- readRDS("F:/Projects/Sunspears/Studies/Patch_Schmidt-et-al/analyses/amplicons/18s/alpha_diversity/objects/p.even.rds")
+
+```
+
+```{r combine rich plots}
+#add subtitles
+p.rich.16s.2 <- p.rich.16s +
+  ggtitle("16S") +
+  theme(plot.title = element_text(hjust = 0.5, size = 18, face = "bold"))
+
+#remove y-axis text and title from plot on right side of final graph
+p.rich.18s.2 <- p.rich.18s + 
+  ggtitle("18S") +
+  theme(axis.title.y = element_blank(),
+        plot.title = element_text(hjust = 0.5, size = 18, face = "bold"))
+
+# Combine plots
+p.final.rich <- p.rich.16s.2 + p.rich.18s.2
+
+# Display the final combined plot
+print(p.final.rich)
+
+```
+
+```{r combine shannon plots}
+#add subtitles
+p.shan.16s.2 <- p.shan.16s +
+  ggtitle("16S") +
+  theme(plot.title = element_text(hjust = 0.5, size = 18, face = "bold"))
+
+#remove y-axis text and title from plot on right side of final graph
+p.shan.18s.2 <- p.shan.18s + 
+  ggtitle("18S") +
+  theme(axis.title.y = element_blank(),
+        axis.text.y = element_blank(),
+        plot.title = element_text(hjust = 0.5, size = 18, face = "bold"))
+
+# Combine plots
+p.final.shan <- p.shan.16s.2 + p.shan.18s.2
+
+# Display the final combined plot
+print(p.final.shan)
+
+```
+
+```{r combine evenness plots}
+#add subtitles
+p.even.16s.2 <- p.even.16s +
+  ggtitle("16S") +
+  theme(plot.title = element_text(hjust = 0.5, size = 18, face = "bold"))
+
+#remove y-axis text and title from plot on right side of final graph
+p.even.18s.2 <- p.even.18s + 
+  ggtitle("18S") +
+  theme(axis.title.y = element_blank(),
+        axis.text.y = element_blank(),
+        plot.title = element_text(hjust = 0.5, size = 18, face = "bold"))
+
+# Combine plots
+p.final.even <- p.even.16s.2 + p.even.18s.2
+
+# Display the final combined plot
+print(p.final.even)
+
+```
+
+####Objects as .rds files 
+```{r save objects}
+#richness scatterplot
+saveRDS(p.final.rich, paste0(output.fp, "/p.final.rich.rds"))
+
+#shannon scatterplot
+saveRDS(p.final.shan, paste0(output.fp, "/p.final.shan.rds"))
+
+#Evenness scatterplot
+saveRDS(p.final.even, paste0(output.fp, "/p.final.even.rds"))
+
+```
+
+```{r save rich figures, include = FALSE}
+#check and set working directory
+setwd("F:/Projects/Sunspears/Studies/Patch_Schmidt-et-al/analyses/amplicons/graphs")
+getwd()
+
+#richness
+#save plot as pdf
+pdf("patch-richness-combined.pdf",         # File name
+    width =11, height = 8.5, # Width and height in inches
+    bg = "white",          # Background Patch_type
+    colormodel = "cmyk",  # Patch_type model (cmyk is required for most publications)
+    paper = "USr")          # Paper size-- portrait: a4", "letter", "legal" (or "us") | landscape: "a4r" and "USr"
+
+#plot
+p.final.rich
+
+# Closing the graphical device
+dev.off() 
+
+##save pdf
+cairo_pdf("patch-richness-combined-ver2.pdf", width = 11, height = 8.5, family = "Helvetica")
+
+##plot to save
+p.final.rich
+
+##Closing the graphical device
+dev.off()
+
+#Save as jpg
+jpeg(filename = "patch-richness-combined5.jpeg", 
+     width = 1000, 
+     height = 600, 
+     units = "px", 
+     pointsize = 12, 
+     quality = 100, 
+     bg = "white", 
+     res = NA)
+
+#plot
+p.final.rich
+
+# Close device
+dev.off()
+
+#save as .svg file
+ggsave("patch-richness-combined.svg", plot = p.final.rich, device = "svg", width = 11, height = 8.5, units = "in")
+
+```
+
+```{r save shan figures, include = FALSE}
+#check and set working directory
+setwd("F:/Projects/Sunspears/Studies/Patch_Schmidt-et-al/analyses/amplicons/graphs")
+getwd()
+
+#shannon
+#save plot as pdf
+pdf("patch-shannon-combined.pdf",         # File name
+    width =11, height = 8.5, # Width and height in inches
+    bg = "white",          # Background Patch_type
+    colormodel = "cmyk",  # Patch_type model (cmyk is required for most publications)
+    paper = "USr")          # Paper size-- portrait: a4", "letter", "legal" (or "us") | landscape: "a4r" and "USr"
+
+#plot
+p.final.shan
+
+# Closing the graphical device
+dev.off() 
+
+##save pdf
+cairo_pdf("patch-shannon-combined-ver2.pdf", width = 11, height = 8.5, family = "Helvetica")
+
+##plot to save
+p.final.shan
+
+##Closing the graphical device
+dev.off()
+
+#Save as jpg
+jpeg(filename = "patch-shannon-combined5.jpeg", 
+     width = 1000, 
+     height = 600, 
+     units = "px", 
+     pointsize = 12, 
+     quality = 100, 
+     bg = "white", 
+     res = NA)
+
+#plot
+p.final.shan
+
+# Close device
+dev.off()
+
+#save as .svg file
+ggsave("patch-shannon-combined.svg", plot = p.final.shan, device = "svg", width = 11, height = 8.5, units = "in")
+
+```
+
+```{r save even figures, include = FALSE}
+#check and set working directory
+setwd("F:/Projects/Sunspears/Studies/Patch_Schmidt-et-al/analyses/amplicons/graphs")
+getwd()
+
+#evenness
+#save plot as pdf
+pdf("patch-evenness-combined.pdf",         # File name
+    width =11, height = 8.5, # Width and height in inches
+    bg = "white",          # Background Patch_type
+    colormodel = "cmyk",  # Patch_type model (cmyk is required for most publications)
+    paper = "USr")          # Paper size-- portrait: a4", "letter", "legal" (or "us") | landscape: "a4r" and "USr"
+
+#plot
+p.final.even
+
+# Closing the graphical device
+dev.off() 
+
+##save pdf
+cairo_pdf("patch-evenness-combined-ver2.pdf", width = 11, height = 8.5, family = "Helvetica")
+
+##plot to save
+p.final.even
+
+##Closing the graphical device
+dev.off()
+
+#Save as jpg
+jpeg(filename = "patch-evenness-combined5.jpeg", 
+     width = 1000, 
+     height = 600, 
+     units = "px", 
+     pointsize = 12, 
+     quality = 100, 
+     bg = "white", 
+     res = NA)
+
+#plot
+p.final.even
+
+# Close device
+dev.off()
+
+#save as .svg file
+ggsave("patch-evenness-combined.svg", plot = p.final.even, device = "svg", width = 11, height = 8.5, units = "in")
+
+```
+
+#End of Script
